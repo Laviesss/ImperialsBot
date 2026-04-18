@@ -124,8 +124,8 @@ ImperialsBot can be hosted on cloud platforms like **Render.com**, **Railway**, 
 | Redis | IMPERIALS_DB_TYPE=redis, IMPERIALS_DB_URL=... |
 
 **Usage:**
-- Viewer: `https://your-app.onrender.com/viewer/PORT`
-- Inventory: `https://your-app.onrender.com/inventory/PORT`
+- Viewer: `https://your-cloud-app.com/viewer/PORT`
+- Inventory: `https://your-cloud-app.com/inventory/PORT`
 - Dashboard shows authorized ports only (security feature)
 
 **Cloud Config Export/Import:**
