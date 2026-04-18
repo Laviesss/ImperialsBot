@@ -102,26 +102,35 @@ Once a bot is selected, you can monitor its state:
 
 ---
 
-### Cloud Deployment (Render)
+### Cloud Deployment
 
-ImperialsBot can be hosted on cloud platforms like Render.com. However, unlike local hosting, cloud containers have ephemeral filesystems - any data saved to local files will be lost on restart.
+ImperialsBot can be hosted on cloud platforms like **Render.com**, **Railway**, **Fly.io**, etc. Cloud containers have ephemeral filesystems - data saved to local files will be lost on restart.
 
-**Render Mode** (`IMPERIALS_CLOUD_MODE=true`) enables:
-- Bot config stored in environment variables (persists across restarts)
-- Viewer and inventory accessible via the main server port through proxy routes
+**Cloud Mode** (`IMPERIALS_CLOUD_MODE=true`) enables:
+- Bot config stored in environment variables, database, or disk
+- Viewer and inventory accessible via proxy routes with port authorization
+- Compression for faster loading
 
-**Setup on Render:**
+**Setup:**
 1. Set environment variable `IMPERIALS_CLOUD_MODE=true`
-2. Deploy and use normally
+2. Optionally add database for persistent storage
+
+**Database Options (recommended for persistence):**
+| Type | Env Vars |
+|------|----------|
+| MongoDB | IMPERIALS_DB_TYPE=mongodb, IMPERIALS_DB_URL=... |
+| PostgreSQL | IMPERIALS_DB_TYPE=postgres, IMPERIALS_DB_URL=... |
+| MySQL | IMPERIALS_DB_TYPE=mysql, IMPERIALS_DB_URL=... |
+| Redis | IMPERIALS_DB_TYPE=redis, IMPERIALS_DB_URL=... |
 
 **Usage:**
-- When enabled, viewer is at `http://your-app.onrender.com/viewer/PORT` (port shown in dashboard)
-- Same for inventory at `/inventory/PORT`
-- Dashboard handles this automatically - nothing else needed
+- Viewer: `https://your-app.onrender.com/viewer/PORT`
+- Inventory: `https://your-app.onrender.com/inventory/PORT`
+- Dashboard shows authorized ports only (security feature)
 
-**Limitations:**
-- Viewer/inventory run on internal ports but accessed via proxy (may have slight latency)
-- Config stored in env vars - large bot lists should still work but keep them reasonable
+**Cloud Config Export/Import:**
+- In dashboard Settings, export config to share or backup
+- Import from URL to load configuration
 
 ---
 

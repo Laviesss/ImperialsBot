@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initDatabase, loadBotsFromDB, saveBotsToDB, loadSettingsFromDB, saveSettingsToDB, isDatabaseConnected, getDatabaseType } from './DatabaseStorage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,10 +33,23 @@ export class ConfigLoader {
     }
 
     static async loadBots() {
+        // Priority: Database > Env Var > File
+        if (isDatabaseConnected()) {
+            const dbBots = await loadBotsFromDB();
+            if (dbBots) {
+                console.log(`\x1b[32m✓ Loaded bots from ${getDatabaseType()}\x1b[0m`);
+                return dbBots;
+            }
+        }
+        
         if (this.isCloud) {
             const envData = getJsonFromEnv('IMPERIALS_BOTS');
-            if (envData) return envData;
+            if (envData) {
+                console.log('\x1b[32m✓ Loaded bots from IMPERIALS_BOTS env var\x1b[0m');
+                return envData;
+            }
         }
+        
         try {
             const data = await fs.readFile(CONFIG_PATH, 'utf-8');
             return JSON.parse(data);
@@ -48,10 +62,15 @@ export class ConfigLoader {
     }
 
     static async saveBots(bots) {
-        if (this.isCloud) {
-            setJsonInEnv('IMPERIALS_BOTS', bots);
-            return;
+        if (isDatabaseConnected()) {
+            await saveBotsToDB(bots);
+            console.log(`\x1b[32m✓ Saved bots to ${getDatabaseType()}\x1b[0m`);
         }
+        
+        if (this.isCloud && !isDatabaseConnected()) {
+            setJsonInEnv('IMPERIALS_BOTS', bots);
+        }
+        
         await fs.writeFile(CONFIG_PATH, JSON.stringify(bots, null, 2));
     }
 
@@ -74,10 +93,23 @@ export class ConfigLoader {
     }
 
     static async loadSettings() {
+        // Priority: Database > Env Var > File
+        if (isDatabaseConnected()) {
+            const dbSettings = await loadSettingsFromDB();
+            if (dbSettings) {
+                console.log(`\x1b[32m✓ Loaded settings from ${getDatabaseType()}\x1b[0m`);
+                return dbSettings;
+            }
+        }
+        
         if (this.isCloud) {
             const envData = getJsonFromEnv('IMPERIALS_SETTINGS');
-            if (envData) return envData;
+            if (envData) {
+                console.log('\x1b[32m✓ Loaded settings from IMPERIALS_SETTINGS env var\x1b[0m');
+                return envData;
+            }
         }
+        
         try {
             const data = await fs.readFile(SETTINGS_PATH, 'utf-8');
             return JSON.parse(data);
@@ -87,12 +119,17 @@ export class ConfigLoader {
     }
 
     static async saveSettings(settings) {
-        if (this.isCloud) {
+        if (isDatabaseConnected()) {
+            await saveSettingsToDB(settings);
+            console.log(`\x1b[32m✓ Saved settings to ${getDatabaseType()}\x1b[0m`);
+        }
+        
+        if (this.isCloud && !isDatabaseConnected()) {
             const current = await this.loadSettings();
             const newSettings = { ...current, ...settings };
             setJsonInEnv('IMPERIALS_SETTINGS', newSettings);
-            return;
         }
+        
         const current = await this.loadSettings() || {};
         const newSettings = { ...current, ...settings };
         await fs.writeFile(SETTINGS_PATH, JSON.stringify(newSettings, null, 2));
@@ -110,3 +147,5 @@ export class ConfigLoader {
         }
     }
 }
+
+export { initDatabase };

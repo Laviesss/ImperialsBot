@@ -1,10 +1,11 @@
 import { Server } from 'socket.io';
 import { botManager } from '../core/BotManager.js';
-import { ConfigLoader } from '../config/ConfigLoader.js';
+import { ConfigLoader, initDatabase } from '../config/ConfigLoader.js';
 import { AuditLogger } from '../utils/AuditLogger.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,11 +98,19 @@ export class SocketServer {
     }
 
     bindEvents() {
-        this.io.on('connection', async (socket) => {
+this.io.on('connection', async (socket) => {
             console.log('Client connected');
             const settings = await ConfigLoader.loadSettings() || {};
-            settings.isCloudMode = ConfigLoader.isCloud;
-            socket.emit('settings', settings);
+            
+            const isCloud = ConfigLoader.isCloud;
+            if (isCloud) {
+                socket.emit('settings', { ...settings, isCloudMode: true });
+            } else {
+                socket.emit('settings', settings);
+            }
+            
+            // Cloud config handlers
+            this.handleCloudConfig(socket);
             socket.emit('globalHeadlessChanged', botManager.isGlobalHeadless);
             socket.emit('botList', botManager.getAllBots());
 
@@ -702,6 +711,37 @@ export class SocketServer {
             autoEatEnabled: bot.featureManager.getFeature('autoeat') ? bot.featureManager.getFeature('autoeat').enabled : false,
             spammerEnabled: spammer ? spammer.config.enabled : false,
             autoReconnectEnabled: bot.config.autoReconnect !== false
+        });
+    }
+
+    // Cloud Config Export/Import handlers
+    async handleCloudConfig(socket) {
+        socket.on('getCloudConfig', async () => {
+            const bots = await ConfigLoader.loadBots();
+            const settings = await ConfigLoader.loadSettings() || {};
+            const cloudConfig = {
+                bots: bots,
+                settings: settings,
+                generatedAt: new Date().toISOString()
+            };
+            const base64 = Buffer.from(JSON.stringify(cloudConfig)).toString('base64');
+            socket.emit('cloudConfigExport', { base64, preview: cloudConfig });
+        });
+
+        socket.on('loadCloudConfig', async (url) => {
+            try {
+                const response = await axios.get(url, { timeout: 10000 });
+                const cloudConfig = response.data;
+                
+                if (cloudConfig.bots) {
+                    await ConfigLoader.saveBots(cloudConfig.bots);
+                    await botManager.loadSavedBots();
+                    this.io.emit('botList', botManager.getAllBots());
+                    socket.emit('notification', { type: 'success', message: 'Config loaded from URL!' });
+                }
+            } catch (err) {
+                socket.emit('notification', { type: 'error', message: 'Failed to load config: ' + err.message });
+            }
         });
     }
 }

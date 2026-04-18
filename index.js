@@ -1,7 +1,7 @@
 import { ExpressServer } from './src/server/ExpressServer.js';
 import { SocketServer } from './src/server/SocketServer.js';
 import { botManager } from './src/core/BotManager.js';
-import { ConfigLoader } from './src/config/ConfigLoader.js';
+import { ConfigLoader, initDatabase } from './src/config/ConfigLoader.js';
 import { Logger } from './src/utils/Logger.js';
 import { AuditLogger } from './src/utils/AuditLogger.js';
 import { UpdateChecker } from './src/utils/UpdateChecker.js';
@@ -10,6 +10,26 @@ import readline from 'readline';
 
 const start = async () => {
     Logger.initGlobalLogging();
+    
+    // Initialize database if configured
+    const dbType = process.env.IMPERIALS_DB_TYPE;
+    const dbUrl = process.env.IMPERIALS_DB_URL;
+    if (dbType && dbUrl) {
+        await initDatabase({
+            type: dbType,
+            connectionString: dbUrl,
+            host: process.env.IMPERIALS_DB_HOST,
+            port: process.env.IMPERIALS_DB_PORT,
+            database: process.env.IMPERIALS_DB_NAME,
+            user: process.env.IMPERIALS_DB_USER,
+            password: process.env.IMPERIALS_DB_PASSWORD
+        });
+    }
+    
+    if (ConfigLoader.isCloud) {
+        console.log('\x1b[36m☁️  CLOUD MODE ENABLED\x1b[0m');
+    }
+    
     await UpdateChecker.check();
 
     process.on('uncaughtException', (err) => {
