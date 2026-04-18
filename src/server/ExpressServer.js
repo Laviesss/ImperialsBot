@@ -1,10 +1,13 @@
 import express from 'express';
 import { createServer } from 'http';
+import { createRequire } from 'module';
 import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ConfigLoader } from '../config/ConfigLoader.js';
+
+const require = createRequire(import.meta.url);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
