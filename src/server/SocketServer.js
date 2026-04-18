@@ -717,15 +717,19 @@ this.io.on('connection', async (socket) => {
     // Cloud Config Export/Import handlers
     async handleCloudConfig(socket) {
         socket.on('getCloudConfig', async () => {
-            const bots = await ConfigLoader.loadBots();
-            const settings = await ConfigLoader.loadSettings() || {};
-            const cloudConfig = {
-                bots: bots,
-                settings: settings,
-                generatedAt: new Date().toISOString()
-            };
-            const base64 = Buffer.from(JSON.stringify(cloudConfig)).toString('base64');
-            socket.emit('cloudConfigExport', { base64, preview: cloudConfig });
+            try {
+                const bots = await ConfigLoader.loadBots();
+                const settings = await ConfigLoader.loadSettings() || {};
+                const cloudConfig = {
+                    bots: bots,
+                    settings: settings,
+                    generatedAt: new Date().toISOString()
+                };
+                const base64 = Buffer.from(JSON.stringify(cloudConfig)).toString('base64');
+                socket.emit('cloudConfigExport', { base64, preview: cloudConfig });
+            } catch (err) {
+                socket.emit('notification', { type: 'error', message: 'Failed to export config: ' + err.message });
+            }
         });
 
         socket.on('loadCloudConfig', async (url) => {

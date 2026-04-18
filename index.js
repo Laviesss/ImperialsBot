@@ -6,6 +6,7 @@ import { Logger } from './src/utils/Logger.js';
 import { AuditLogger } from './src/utils/AuditLogger.js';
 import { UpdateChecker } from './src/utils/UpdateChecker.js';
 import { setViewerBasePort } from './src/features/Viewer.js';
+import { closeDatabase } from './src/config/DatabaseStorage.js';
 import readline from 'readline';
 
 const start = async () => {
@@ -15,7 +16,7 @@ const start = async () => {
     const dbType = process.env.IMPERIALS_DB_TYPE;
     const dbUrl = process.env.IMPERIALS_DB_URL;
     if (dbType && dbUrl) {
-        await initDatabase({
+        const result = await initDatabase({
             type: dbType,
             connectionString: dbUrl,
             host: process.env.IMPERIALS_DB_HOST,
@@ -24,10 +25,14 @@ const start = async () => {
             user: process.env.IMPERIALS_DB_USER,
             password: process.env.IMPERIALS_DB_PASSWORD
         });
+        if (!result.success) {
+            console.log(`\x1b[33m⚠️  Database init failed: ${result.error}\x1b[0m`);
+        }
     }
     
     if (ConfigLoader.isCloud) {
-        console.log('\x1b[36m☁️  CLOUD MODE ENABLED\x1b[0m');
+        const port = process.env.PORT || 3000;
+        console.log(`\x1b[36m☁️  CLOUD MODE ENABLED (port ${port})\x1b[0m`);
     }
     
     await UpdateChecker.check();
@@ -58,7 +63,7 @@ const start = async () => {
     });
 
     let settings = await ConfigLoader.loadSettings();
-    let port = 3000;
+    let port = process.env.PORT || 3000;
 
     if (!settings || !settings.port) {
 
@@ -235,8 +240,9 @@ const start = async () => {
         rl.prompt();
     });
 
-    const handleExit = () => {
+    const handleExit = async () => {
         console.log('\nShutting down gracefully...');
+        await closeDatabase();
         botManager.shutdown();
         setTimeout(() => process.exit(0), 1000);
     };

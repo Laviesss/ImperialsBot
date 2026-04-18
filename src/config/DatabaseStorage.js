@@ -201,3 +201,29 @@ export function isDatabaseConnected() {
 export function getDatabaseType() {
     return dbType;
 }
+
+export async function closeDatabase() {
+    if (!dbClient) return;
+    
+    try {
+        switch (dbType) {
+            case 'mongodb':
+                await dbClient.close();
+                break;
+            case 'postgres':
+                await dbClient.end();
+                break;
+            case 'mysql':
+                await dbClient.end();
+                break;
+            case 'redis':
+                await dbClient.quit();
+                break;
+        }
+        dbClient = null;
+        dbType = null;
+        console.log('\x1b[32m✓ Database connection closed\x1b[0m');
+    } catch (err) {
+        console.log('\x1b[31m✗ Error closing database:', err.message, '\x1b[0m');
+    }
+}

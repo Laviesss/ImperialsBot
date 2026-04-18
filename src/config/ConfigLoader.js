@@ -130,6 +130,7 @@ export class ConfigLoader {
             setJsonInEnv('IMPERIALS_SETTINGS', newSettings);
         }
         
+        // Only load once for file save
         const current = await this.loadSettings() || {};
         const newSettings = { ...current, ...settings };
         await fs.writeFile(SETTINGS_PATH, JSON.stringify(newSettings, null, 2));
