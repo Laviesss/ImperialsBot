@@ -352,7 +352,13 @@ this.io.on('connection', async (socket) => {
 
                     socket.emit('botStatus', { username, status: bot.status, inventoryPort: bot.inventoryPort });
 
+                    console.log(`[SocketServer] requestBotData for ${username}:`);
+                    console.log(`  - viewerPort: ${bot.viewerPort}`);
+                    console.log(`  - inventoryPort: ${bot.inventoryPort}`);
+                    console.log(`  - status: ${bot.status}`);
+
                     if (bot.viewerPort) {
+                        console.log(`[SocketServer] Emitting botViewer to client for ${username} with port ${bot.viewerPort}`);
                         socket.emit('botViewer', {
                             username,
                             port: bot.viewerPort,

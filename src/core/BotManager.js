@@ -142,10 +142,16 @@ class BotManager extends EventEmitter {
 
     getAuthorizedPorts() {
         const ports = new Set();
-        for (const bot of this.bots.values()) {
+        console.log(`[BOTMANAGER] getAuthorizedPorts() called, total bots: ${this.bots.size}`);
+        for (const [username, bot] of this.bots.entries()) {
+            console.log(`[BOTMANAGER] Bot ${username}:`);
+            console.log(`  - viewerPort: ${bot.viewerPort} (type: ${typeof bot.viewerPort})`);
+            console.log(`  - inventoryPort: ${bot.inventoryPort} (type: ${typeof bot.inventoryPort})`);
+            console.log(`  - status: ${bot.status}`);
             if (bot.viewerPort) ports.add(parseInt(bot.viewerPort));
             if (bot.inventoryPort) ports.add(parseInt(bot.inventoryPort));
         }
+        console.log(`[BOTMANAGER] Returning authorized ports: ${Array.from(ports).join(', ')}`);
         return ports;
     }
 
