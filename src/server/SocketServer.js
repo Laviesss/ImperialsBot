@@ -356,8 +356,11 @@ export class SocketServer {
                         count: item.count
                     }));
                     socket.emit('botInventory', { username, items: inventory });
-
                     socket.emit('botStatus', { username, status: bot.status, inventoryPort: bot.inventoryPort });
+
+                    // Load chat history from DB
+                    const history = await botManager.getChatHistory(username);
+                    socket.emit('botChatHistory', { username, history });
 
                     if (bot.viewerPort) {
                         socket.emit('botViewer', {
@@ -366,6 +369,7 @@ export class SocketServer {
                             firstPerson: !!bot.config.firstPerson
                         });
                     }
+                }
                 }
             });
 

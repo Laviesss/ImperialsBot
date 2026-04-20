@@ -6,13 +6,23 @@ import { Logger } from './src/utils/Logger.js';
 import { AuditLogger } from './src/utils/AuditLogger.js';
 import { UpdateChecker } from './src/utils/UpdateChecker.js';
 import { setViewerBasePort } from './src/features/Viewer.js';
+import { initDatabase } from './src/config/DatabaseStorage.js';
 import readline from 'readline';
 
 const start = async () => {
     Logger.initGlobalLogging();
     await UpdateChecker.check();
 
+    // Initialize Database for Chat Logs
+    const settings = await ConfigLoader.loadSettings();
+    if (settings && settings.database) {
+        await initDatabase(settings.database);
+    } else {
+        Logger.log('No database configured for chat logs. Chat history will be volatile.', 'WARNING');
+    }
+
     process.on('uncaughtException', (err) => {
+
         // Suppress known library-level TypeErrors that shouldn't crash the whole app
         const isInventoryCrash = err.message && err.message.includes("reading 'id'") && err.stack && err.stack.includes('mineflayer-web-inventory');
 

@@ -4,7 +4,7 @@
   "description": "Multi-bot management tool for Minecraft with web interface",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node --max-old-space-size=512 index.js",
     "dev": "node --watch index.js"
   },
   "keywords": [

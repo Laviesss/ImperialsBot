@@ -1110,34 +1110,42 @@ socket.on('botChat', (payload) => {
         if (!repeatSpan) {
             repeatSpan = document.createElement('span');
             repeatSpan.className = 'repeat-count';
-            repeatSpan.style.cssText = 'color: var(--primary); font-weight: bold; margin-left: 8px; font-size: 0.85em; opacity: 0.8;';
+            repeatSpan.style.marginLeft = '5px';
+            repeatSpan.style.fontSize = '0.8em';
+            repeatSpan.style.color = '#aaa';
             lastMsg.appendChild(repeatSpan);
         }
         repeatSpan.innerText = `(x${count})`;
-
-        // Keep scroll at bottom if it was already there
-        const isAtBottom = (targetBox.scrollHeight - targetBox.scrollTop - targetBox.clientHeight) < 100;
-        if (isAtBottom) {
-            targetBox.scrollTop = targetBox.scrollHeight;
-        }
-        return;
+    } else {
+        renderChatMessage({
+            username: payload.sender || '[Server]',
+            message: payload.message,
+            type: payload.type || 'info',
+            timestamp: payload.timestamp || now,
+            raw: payload.raw || payload.message
+        }, targetBox);
     }
+    targetBox.scrollTop = targetBox.scrollHeight;
+});
 
-    const msgObj = {
-        username: sender,
-        message: payload.message,
-        type: payload.type || 'chat',
-        raw: compareText,
-        timestamp: now
-    };
+socket.on('botChatHistory', (data) => {
+    const { username, history } = data;
+    if (!username || !history) return;
 
-    if (chatVisible) {
-        const isAtBottom = (targetBox.scrollHeight - targetBox.scrollTop - targetBox.clientHeight) < 50;
-        renderChatMessage(msgObj, targetBox);
-        if (isAtBottom) {
-            targetBox.scrollTop = targetBox.scrollHeight;
-        }
-    }
+    const targetBox = getChatBox(username);
+    targetBox.innerHTML = '';
+
+    // History comes in DESC order from DB, reverse it for display
+    [...history].reverse().forEach(msg => {
+        renderChatMessage({
+            username: msg.sender,
+            message: msg.message,
+            type: msg.type || 'info',
+            timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
+            raw: msg.message
+        }, targetBox);
+    });
+    targetBox.scrollTop = targetBox.scrollHeight;
 });
 
 function renderChatMessage(msg, targetBox = chatBox) {

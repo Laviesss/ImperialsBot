@@ -11,6 +11,7 @@ import { ProxyAgent } from 'proxy-agent';
 import { SocksClient } from 'socks';
 import axios from 'axios';
 import { getBasePort } from '../utils/ConfigBase.js';
+import { saveChatMessage } from '../config/DatabaseStorage.js';
 
 export class BotClient extends EventEmitter {
     constructor(config) {
@@ -72,7 +73,7 @@ export class BotClient extends EventEmitter {
 
         const displayMessage = ansi || message;
 
-        const plainText = displayMessage.replace(/\x1b\[[0-9;]*m/g, '').trim();
+        const plainText = displayMessage.replace(/\\x1b\\[[0-9;]*m/g, '').trim();
         if (plainText.length === 0) return;
 
         for (const recent of this.recentMessages) {
@@ -81,6 +82,11 @@ export class BotClient extends EventEmitter {
 
         this.recentMessages.add(plainText);
         setTimeout(() => this.recentMessages.delete(plainText), 1000);
+
+        // Save to database if connected
+        saveChatMessage(this.username, username || '[Server]', plainText, type).catch(err => {
+            this.log(`Failed to save chat log to DB: ${err.message}`, 'error');
+        });
 
         this.emit('chat', {
             message: displayMessage,
@@ -635,14 +641,17 @@ export class BotClient extends EventEmitter {
             this.emitChat('[Server]', '\x1b[1;36mDIMENSION CHANGE\x1b[0m', 'chat');
         });
 
-        instance.on('kicked', (reason) => {
+        instance.on('error', (err) => {
             if (this.bot !== instance) return;
-            const reasonStr = this.parseReason(reason);
-            this.log(`Kicked: ${reasonStr}`, 'error');
-            this.updateStatus('Kicked');
+            this.log(`Bot encountered an error: ${err.message}`, 'error');
+            
+            if (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT') {
+                this.log('Connection lost, triggering reconnect...', 'warning');
+                this.rejoin();
+            }
         });
 
-        instance.on('error', (err) => {
+        instance.on('kicked', (reason) => {
             if (this.bot !== instance) return;
             if (err.code === 'ECONNRESET' && this.lastSpawnTime && (Date.now() - this.lastSpawnTime) < 10000) {
                 this.isTransferring = true;

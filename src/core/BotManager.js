@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { BotClient } from './BotClient.js';
 import { ConfigLoader } from '../config/ConfigLoader.js';
+import { loadChatHistory } from '../config/DatabaseStorage.js';
 
 class BotManager extends EventEmitter {
     constructor() {
@@ -147,6 +148,10 @@ class BotManager extends EventEmitter {
             if (bot.inventoryPort) ports.add(parseInt(bot.inventoryPort));
         }
         return ports;
+    }
+
+    async getChatHistory(username, limit = 100) {
+        return await loadChatHistory(username, limit);
     }
 
     async updateBot(config) {
