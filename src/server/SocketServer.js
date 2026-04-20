@@ -1,10 +1,11 @@
 import { Server } from 'socket.io';
 import { botManager } from '../core/BotManager.js';
-import { ConfigLoader } from '../config/ConfigLoader.js';
+import { ConfigLoader, initDatabase } from '../config/ConfigLoader.js';
 import { AuditLogger } from '../utils/AuditLogger.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +14,7 @@ const PLUGINS_DIR = path.join(__dirname, '../plugins');
 export class SocketServer {
     constructor(httpServer) {
         this.io = new Server(httpServer);
-        this.activeProxyChecks = new Map(); // Tracks AbortControllers by socket.id
+        this.activeProxyChecks = new Map(); 
         this.bindGlobalEvents();
         this.bindEvents();
         AuditLogger.init();
@@ -47,12 +48,10 @@ export class SocketServer {
         });
 
         botManager.on('botStatus', (data) => {
-            // Status is global for the sidebar/bot list
             this.io.emit('botStatus', data);
         });
 
         botManager.on('botSpawn', (username) => {
-            // Global update for bot list
             this.io.emit('botList', botManager.getAllBots());
         });
 
@@ -100,8 +99,15 @@ export class SocketServer {
         this.io.on('connection', async (socket) => {
             console.log('Client connected');
             const settings = await ConfigLoader.loadSettings() || {};
-            settings.isCloudMode = ConfigLoader.isCloud;
-            socket.emit('settings', settings);
+            
+            const isCloud = ConfigLoader.isCloud;
+            if (isCloud) {
+                socket.emit('settings', { ...settings, isCloudMode: true });
+            } else {
+                socket.emit('settings', settings);
+            }
+            
+            this.handleCloudConfig(socket);
             socket.emit('globalHeadlessChanged', botManager.isGlobalHeadless);
             socket.emit('botList', botManager.getAllBots());
 
@@ -140,13 +146,11 @@ export class SocketServer {
             });
 
             socket.on('selectBot', (username) => {
-                // Leave all bot rooms first
                 for (const room of socket.rooms) {
                     if (room.startsWith('bot:')) {
                         socket.leave(room);
                     }
                 }
-                // Join new bot room if username provided
                 if (username) {
                     socket.join(`bot:${username}`);
                     console.log(`Client ${socket.id} joined room bot:${username}`);
@@ -160,12 +164,7 @@ export class SocketServer {
                 } catch (err) {
                     console.error('Error during shutdown:', err);
                 }
-
-                // Allow a moment for bots to disconnect before exiting
-                setTimeout(() => {
-                    console.log('Server process exiting.');
-                    process.exit(0);
-                }, 1000);
+                setTimeout(() => process.exit(0), 1000);
             });
 
             socket.on('createBot', async (config) => {
@@ -249,7 +248,6 @@ export class SocketServer {
                         bot.chat(word);
                     }
 
-                    // Stagger: wait 800ms between messages to bypass some spam filters and look coordinated
                     if (i < words.length - 1) {
                         await new Promise(resolve => setTimeout(resolve, 800));
                     }
@@ -267,10 +265,7 @@ export class SocketServer {
                             const fileUrl = pathToFileURL(filePath).href + '?t=' + Date.now();
                             const module = await import(fileUrl);
                             const PluginClass = module.default || module.Plugin;
-                            if (!PluginClass) {
-                                console.warn(`Plugin ${file} has no export (neither default nor Plugin)`);
-                                continue;
-                            }
+                            if (!PluginClass) continue;
                             const p = new PluginClass();
                             plugins.push({
                                 name: p.name || file.replace('.js', ''),
@@ -285,6 +280,7 @@ export class SocketServer {
                     console.error('Failed to get available plugins:', err);
                 }
             });
+
             socket.on('requestAnalyticsHistory', (payload) => {
                 const bot = botManager.getBot(payload.username);
                 if (bot) {
@@ -298,10 +294,14 @@ export class SocketServer {
                 }
             });
 
-            socket.on('requestBotData', (data) => {
+            socket.on('requestBotData', async (data) => {
                 const { username } = data;
                 const bot = botManager.getBot(username);
                 if (!bot) return;
+
+                // Restore chat history from DB
+                const history = await botManager.getChatHistory(username);
+                socket.emit('botChatHistory', { username, history });
 
                 socket.emit('chatHistory', { username: bot.username, history: bot.chatHistory || [] });
                 this.broadcastToggles(username, socket);
@@ -315,13 +315,7 @@ export class SocketServer {
                 } else {
                     socket.emit('spammerConfig', { 
                         username, 
-                        config: { 
-                            delay: 3, 
-                            messages: [], 
-                            order: 'random', 
-                            appendRandom: false, 
-                            randomLength: 5 
-                        } 
+                        config: { delay: 3, messages: [], order: 'random', appendRandom: false, randomLength: 5 } 
                     });
                 }
 
@@ -358,10 +352,6 @@ export class SocketServer {
                     socket.emit('botInventory', { username, items: inventory });
                     socket.emit('botStatus', { username, status: bot.status, inventoryPort: bot.inventoryPort });
 
-                    // Load chat history from DB
-                    const history = await botManager.getChatHistory(username);
-                    socket.emit('botChatHistory', { username, history });
-
                     if (bot.viewerPort) {
                         socket.emit('botViewer', {
                             username,
@@ -370,25 +360,21 @@ export class SocketServer {
                         });
                     }
                 }
-                }
             });
 
             socket.on('botAction', async (data) => {
                 const { username, action, payload } = data;
                 AuditLogger.log('Dashboard', socket.id, `Bot Action ${action} ${username ? `on bot ${username}` : '(Global)'}`);
 
-                // Global Actions (No bot required)
                 if (action === 'checkProxies') {
                     console.log(`[SocketServer] Starting proxy check for socket ${socket.id}. Count: ${payload?.proxies?.length}`);
                     try {
                         const controller = new AbortController();
                         this.activeProxyChecks.set(socket.id, controller);
-
                         const { ProxyChecker } = await import('../utils/ProxyChecker.js');
                         const results = await ProxyChecker.checkList(payload.proxies, (progress) => {
                             socket.emit('proxyCheckProgress', progress);
                         }, controller.signal);
-
                         this.activeProxyChecks.delete(socket.id);
                         socket.emit('proxyCheckResults', results);
                     } catch (err) {
@@ -431,19 +417,14 @@ export class SocketServer {
                         break;
                     case 'move':
                         const navigation = bot.featureManager.getFeature('navigation');
-                        if (navigation) {
-                            navigation.moveTo(payload.x, payload.y, payload.z);
-                        } else {
-                            socket.emit('notification', { type: 'error', message: 'Navigation feature not available' });
-                        }
+                        if (navigation) navigation.moveTo(payload.x, payload.y, payload.z);
+                        else socket.emit('notification', { type: 'error', message: 'Navigation feature not available' });
                         break;
                     case 'stopNavigation':
                         const navToStop = bot.featureManager.getFeature('navigation');
                         if (navToStop) navToStop.stop();
                         const combatToStop = bot.featureManager.getFeature('combat');
-                        if (combatToStop) {
-                            if (bot.pvp) bot.pvp.stop();
-                        }
+                        if (combatToStop && bot.pvp) bot.pvp.stop();
                         break;
                     case 'toggleKillaura':
                         const combat = bot.featureManager.getFeature('combat');
@@ -460,11 +441,7 @@ export class SocketServer {
                             combatForConfig.updateConfig(payload.config);
                             bot.config.killauraConfig = combatForConfig.getConfig();
                             botManager.updateBot(bot.config).catch(e => console.error(e));
-                            
-                            this.io.emit('killauraConfig', {
-                                username: bot.username,
-                                config: bot.config.killauraConfig
-                            });
+                            this.io.emit('killauraConfig', { username: bot.username, config: bot.config.killauraConfig });
                         }
                         break;
                     case 'toggleSpammer':
@@ -477,17 +454,10 @@ export class SocketServer {
                                 spammer.setConfig({ enabled: false });
                                 spammer.stop();
                             }
-
                             if (!bot.config.spammer) bot.config.spammer = {};
                             bot.config.spammer.enabled = payload.enabled;
-                            if (payload.config) {
-                                bot.config.spammer = { ...bot.config.spammer, ...payload.config };
-                            }
-                            
-                            botManager.updateBot(bot.config).catch(err => {
-                                console.error('Failed to save spammer config:', err);
-                            });
-
+                            if (payload.config) bot.config.spammer = { ...bot.config.spammer, ...payload.config };
+                            botManager.updateBot(bot.config).catch(err => console.error('Failed to save spammer config:', err));
                             this.broadcastToggles(username);
                         }
                         break;
@@ -541,9 +511,7 @@ export class SocketServer {
                         break;
                     case 'stopNavigation':
                         const navFeature = bot.featureManager.getFeature('navigation');
-                        if (navFeature) {
-                            navFeature.stop();
-                        }
+                        if (navFeature) navFeature.stop();
                         break;
                     case 'rejoin':
                         bot.rejoin();
@@ -557,23 +525,13 @@ export class SocketServer {
                     case 'click':
                         if (payload.type === 'left') {
                             bot.bot.swingArm('right');
-
-                            // Find nearest entity first
-                            const entity = bot.bot.nearestEntity(e =>
-                                (e.type === 'player' || e.type === 'mob') &&
-                                bot.bot.entity.position.distanceTo(e.position) < 4
-                            );
-
-                            if (entity) {
-                                bot.bot.attack(entity);
-                            } else {
-                                // Fallback to digging
+                            const entity = bot.bot.nearestEntity(e => (e.type === 'player' || e.type === 'mob') && bot.bot.entity.position.distanceTo(e.position) < 4);
+                            if (entity) bot.bot.attack(entity);
+                            else {
                                 const block = bot.bot.blockAtCursor(5);
                                 if (block) {
                                     if (bot.bot.targetDigBlock) bot.bot.stopDigging();
-                                    bot.bot.dig(block, false).catch(err => {
-                                        if (err.message !== 'Digging aborted') console.error('Digging error:', err);
-                                    });
+                                    bot.bot.dig(block, false).catch(err => { if (err.message !== 'Digging aborted') console.error('Digging error:', err); });
                                 }
                             }
                         } else if (payload.type === 'right') {
@@ -582,15 +540,11 @@ export class SocketServer {
                         break;
                     case 'toggleView':
                         const viewerFeature = bot.featureManager.getFeature('viewer');
-                        if (viewerFeature) {
-                            viewerFeature.toggleView();
-                        }
+                        if (viewerFeature) viewerFeature.toggleView();
                         break;
                     case 'suicide':
                         const combatForSuicide = bot.featureManager.getFeature('combat');
-                        if (combatForSuicide) {
-                            combatForSuicide.suicide();
-                        }
+                        if (combatForSuicide) combatForSuicide.suicide();
                         break;
                     case 'stop':
                         botManager.stopBot(username);
@@ -599,11 +553,8 @@ export class SocketServer {
                         botManager.removeBot(username);
                         break;
                     case 'togglePacketDebug':
-                        if (payload.enabled) 
-                            bot.enablePacketDebug();
-                        else 
-                            bot.disablePacketDebug();
-                        break;
+                        if (payload.enabled) bot.enablePacketDebug();
+                        else bot.disablePacketDebug();
                         break;
                 }
             });
@@ -614,8 +565,7 @@ export class SocketServer {
                 if (botClient && botClient.bot && botClient.bot.entity) {
                     try {
                         botClient.bot.setControlState(control, state);
-                    } catch (error) {
-                    }
+                    } catch (error) { }
                 }
             });
 
@@ -625,7 +575,6 @@ export class SocketServer {
                 usernames.forEach(username => {
                     const bot = botManager.getBot(username);
                     if (!bot) return;
-
                     switch (action) {
                         case 'move':
                             const nav = bot.featureManager.getFeature('navigation');
@@ -658,44 +607,24 @@ export class SocketServer {
             this.io.emit('botStatus', { username, status: 'Created' });
             const bot = botManager.getBot(username);
             if (!bot) return;
-
             bot.on('pluginError', (data) => {
-                this.io.emit('notification', {
-                    type: 'error',
-                    message: `Plugin '${data.name}' crashed: ${data.error}`
-                });
-                if (bot.pluginManager) {
-                    this.io.emit('pluginList', { username: bot.username, plugins: bot.pluginManager.getAllPlugins() });
-                }
+                this.io.emit('notification', { type: 'error', message: `Plugin '${data.name}' crashed: ${data.error}` });
+                if (bot.pluginManager) this.io.emit('pluginList', { username: bot.username, plugins: bot.pluginManager.getAllPlugins() });
             });
         });
 
         botManager.on('botSpawn', (username) => {
             const bot = botManager.getBot(username);
             if (!bot) return;
-
             this.io.emit('botStatus', { username, status: 'Online' });
-
-            if (bot.pluginManager) {
-                this.io.emit('pluginList', { username: bot.username, plugins: bot.pluginManager.getAllPlugins() });
-            }
-
-            if (bot.chatHistory) {
-                this.io.emit('chatHistory', { username: bot.username, history: bot.chatHistory });
-            }
-
+            if (bot.pluginManager) this.io.emit('pluginList', { username: bot.username, plugins: bot.pluginManager.getAllPlugins() });
+            if (bot.chatHistory) this.io.emit('chatHistory', { username: bot.username, history: bot.chatHistory });
             if (bot.viewerPort) {
-                this.io.emit('botViewer', {
-                    username: bot.username,
-                    port: bot.viewerPort,
-                    firstPerson: !!bot.config.firstPerson
-                });
+                this.io.emit('botViewer', { username: bot.username, port: bot.viewerPort, firstPerson: !!bot.config.firstPerson });
             }
-
             const killaura = bot.featureManager.getFeature('combat');
             const antiafk = bot.featureManager.getFeature('antiafk');
             const autoauth = bot.featureManager.getFeature('autoauth');
-
             this.io.emit('botToggles', {
                 username: bot.username,
                 killauraEnabled: killaura ? killaura.killauraEnabled : false,
@@ -705,14 +634,9 @@ export class SocketServer {
                 autoReconnectEnabled: bot.config.autoReconnect,
                 spammerEnabled: bot.featureManager.getFeature('spammer') ? bot.featureManager.getFeature('spammer').config.enabled : false
             });
-
             const spammer = bot.featureManager.getFeature('spammer');
             if (spammer) {
-                this.io.emit('spammerConfig', {
-                    username: bot.username,
-                    enabled: spammer.config.enabled,
-                    config: spammer.config
-                });
+                this.io.emit('spammerConfig', { username: bot.username, enabled: spammer.config.enabled, config: spammer.config });
             }
         });
 
@@ -728,13 +652,11 @@ export class SocketServer {
     broadcastToggles(username, socket = null) {
         const bot = botManager.getBot(username);
         if (!bot) return;
-
         const killaura = bot.featureManager?.getFeature('combat');
         const antiafk = bot.featureManager?.getFeature('antiafk');
         const autoauth = bot.featureManager?.getFeature('autoauth');
         const spammer = bot.featureManager?.getFeature('spammer');
         const autoeat = bot.featureManager?.getFeature('autoeat');
-
         const data = {
             username: bot.username,
             killauraEnabled: killaura ? killaura.killauraEnabled : (bot.config.killaura === true),
@@ -744,11 +666,39 @@ export class SocketServer {
             spammerEnabled: spammer ? spammer.config.enabled : (bot.config.spammer?.enabled === true),
             autoReconnectEnabled: bot.config.autoReconnect !== false
         };
-
         if (socket) {
             socket.emit('botToggles', data);
         } else {
             this.io.emit('botToggles', data);
         }
+    }
+
+    async handleCloudConfig(socket) {
+        socket.on('getCloudConfig', async () => {
+            try {
+                const bots = await ConfigLoader.loadBots();
+                const settings = await ConfigLoader.loadSettings() || {};
+                const cloudConfig = { bots, settings, generatedAt: new Date().toISOString() };
+                const base64 = Buffer.from(JSON.stringify(cloudConfig)).toString('base64');
+                socket.emit('cloudConfigExport', { base64, preview: cloudConfig });
+            } catch (err) {
+                socket.emit('notification', { type: 'error', message: 'Failed to export config: ' + err.message });
+            }
+        });
+
+        socket.on('loadCloudConfig', async (url) => {
+            try {
+                const response = await axios.get(url, { timeout: 10000 });
+                const cloudConfig = response.data;
+                if (cloudConfig.bots) {
+                    await ConfigLoader.saveBots(cloudConfig.bots);
+                    await botManager.loadSavedBots();
+                    this.io.emit('botList', botManager.getAllBots());
+                    socket.emit('notification', { type: 'success', message: 'Config loaded from URL!' });
+                }
+            } catch (err) {
+                socket.emit('notification', { type: 'error', message: 'Failed to load config: ' + err.message });
+            }
+        });
     }
 }

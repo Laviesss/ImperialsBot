@@ -1,10 +1,14 @@
 import express from 'express';
 import { createServer } from 'http';
+import { createRequire } from 'module';
+import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
+import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createProxyMiddleware } from 'http-proxy-middleware';
-import compression from 'compression';
 import { ProxyAgent } from 'proxy-agent';
+import { ConfigLoader } from '../config/ConfigLoader.js';
+
+const require = createRequire(import.meta.url);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,40 +40,37 @@ export class ExpressServer {
         }));
     }
 
+    createProxyHandler(targetPort) {
+        return createProxyMiddleware({
+            target: `http://127.0.0.1:${targetPort}`,
+            changeOrigin: true,
+            pathRewrite: (path) => path,
+            onProxyReq: (proxyReq, req, res) => {
+                fixRequestBody(proxyReq, req);
+            },
+            onError: (err, req, res) => {
+                console.error(`Proxy error for port ${targetPort}: ${err.message}`);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: 'Connection to internal service failed' });
+                }
+            },
+            logLevel: 'silent'
+        });
+    }
+
     setupRoutes() {
         this.app.get('/', (req, res) => {
             res.sendFile(path.join(__dirname, '../../public/index.html'));
         });
 
-        // Proxy Route for Viewer
-        this.app.use('/viewer/:port', (req, res, next) => {
-            const targetPort = parseInt(req.params.port);
-            
-            // proxy to ports currently authorized by the BotManager
-            const { botManager } = require('../core/BotManager.js');
-            const authorizedPorts = botManager.getAuthorizedPorts();
-            
-            if (targetPort && authorizedPorts.has(targetPort)) {
-                const proxy = createProxyMiddleware({
-                    target: `http://localhost:${targetPort}`,
-                    ws: true,
-                    changeOrigin: true,
-                    pathRewrite: (path) => path
-                });
-                proxy(req, res, next);
-            } else {
-                res.status(403).json({ error: 'Access Denied: Port not authorized' });
-            }
-        });
-
-        // CAPTCHA Bridge Proxy
+        // CAPTCHA Bridge Proxy (Available in all modes)
         this.app.get('/bridge/solve', async (req, res) => {
             const { target, bot: botName } = req.query;
             if (!target) return res.status(400).send('Target URL required');
 
             try {
                 let agent = null;
-                const { botManager } = await import('../core/BotManager.js');
+                const { botManager } = require('../core/BotManager.js');
                 const bot = botManager.getBot(botName);
                 
                 if (bot && bot.config && bot.config.proxy) {
@@ -91,26 +92,40 @@ export class ExpressServer {
             }
         });
 
-        // Proxy Route for Inventory
-        this.app.use('/inventory/:port', (req, res, next) => {
-            const targetPort = parseInt(req.params.port);
-            
-            import('../core/BotManager.js').then(({ botManager }) => {
-                const authorizedPorts = botManager.getAuthorizedPorts();
+        // Only use proxy routes in cloud mode
+        if (ConfigLoader.isCloud) {
+            // Proxy Route for Viewer
+            this.app.use('/viewer/:port', (req, res, next) => {
+                const targetPort = parseInt(req.params.port);
+                if (!targetPort || isNaN(targetPort)) return res.status(400).json({ error: 'Invalid port' });
 
-                if (targetPort && authorizedPorts.has(targetPort)) {
-                    const proxy = createProxyMiddleware({
-                        target: `http://localhost:${targetPort}`,
-                        ws: true,
-                        changeOrigin: true,
-                        pathRewrite: (path) => path
-                    });
+                const { botManager } = require('../core/BotManager.js');
+                const authorizedPorts = botManager.getAuthorizedPorts();
+                
+                if (authorizedPorts.has(targetPort)) {
+                    const proxy = this.createProxyHandler(targetPort);
                     proxy(req, res, next);
                 } else {
                     res.status(403).json({ error: 'Access Denied: Port not authorized' });
                 }
             });
-        });
+
+            // Proxy Route for Inventory
+            this.app.use('/inventory/:port', (req, res, next) => {
+                const targetPort = parseInt(req.params.port);
+                if (!targetPort || isNaN(targetPort)) return res.status(400).json({ error: 'Invalid port' });
+
+                const { botManager } = require('../core/BotManager.js');
+                const authorizedPorts = botManager.getAuthorizedPorts();
+
+                if (authorizedPorts.has(targetPort)) {
+                    const proxy = this.createProxyHandler(targetPort);
+                    proxy(req, res, next);
+                } else {
+                    res.status(403).json({ error: 'Access Denied: Port not authorized' });
+                }
+            });
+        }
     }
 
     start() {

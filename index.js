@@ -1,84 +1,65 @@
 import { ExpressServer } from './src/server/ExpressServer.js';
 import { SocketServer } from './src/server/SocketServer.js';
 import { botManager } from './src/core/BotManager.js';
-import { ConfigLoader } from './src/config/ConfigLoader.js';
+import { ConfigLoader, initDatabase } from './src/config/ConfigLoader.js';
 import { Logger } from './src/utils/Logger.js';
 import { AuditLogger } from './src/utils/AuditLogger.js';
 import { UpdateChecker } from './src/utils/UpdateChecker.js';
 import { setViewerBasePort } from './src/features/Viewer.js';
-import { initDatabase } from './src/config/DatabaseStorage.js';
+import { initDatabase as initDB, closeDatabase } from './src/config/DatabaseStorage.js';
 import readline from 'readline';
 
 const start = async () => {
     Logger.initGlobalLogging();
     await UpdateChecker.check();
 
-    // Initialize Database for Chat Logs
+    // Initialize database if configured
     const settings = await ConfigLoader.loadSettings();
     if (settings && settings.database) {
-        await initDatabase(settings.database);
+        await initDB(settings.database);
     } else {
         Logger.log('No database configured for chat logs. Chat history will be volatile.', 'WARNING');
     }
 
     process.on('uncaughtException', (err) => {
-
-        // Suppress known library-level TypeErrors that shouldn't crash the whole app
         const isInventoryCrash = err.message && err.message.includes("reading 'id'") && err.stack && err.stack.includes('mineflayer-web-inventory');
-
         if (isInventoryCrash) {
             Logger.originalConsole.error('SUPPRESSED RECOVERABLE CRASH (Inventory):', err.message);
             Logger.log(`Recovered from Inventory Viewer crash: ${err.message}`, 'WARNING');
             return;
         }
-
         Logger.originalConsole.error('UNCAUGHT EXCEPTION:', err);
         Logger.log(`UNCAUGHT EXCEPTION: ${err.stack || err.message}`, 'CRITICAL');    });
 
     process.on('unhandledRejection', (reason, promise) => {
         const isTimeout = reason && (reason.code === 'ETIMEDOUT' || reason.name === 'AggregateError');
-
         if (isTimeout) {
             Logger.originalConsole.warn('UNHANDLED TIMEOUT (Network):', reason.message || reason);
             return;
         }
-
         Logger.originalConsole.error('UNHANDLED REJECTION:', reason);
         Logger.log(`UNHANDLED REJECTION: ${reason}`, 'CRITICAL');
     });
 
-    let settings = await ConfigLoader.loadSettings();
-    let port = 3000;
+    let settingsCfg = await ConfigLoader.loadSettings();
+    let port = process.env.PORT || 3000;
 
-    if (!settings || !settings.port) {
-
-        if (!settings) {
-            const rl = readline.createInterface({
-                input: process.stdin,
-                output: process.stdout
-            });
-
-            const answer = await new Promise(resolve => {
-                rl.question('Enter server port (default 3000): ', resolve);
-            });
-
+    if (!settingsCfg || !settingsCfg.port) {
+        if (!settingsCfg) {
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            const answer = await new Promise(resolve => rl.question('Enter server port (default 3000): ', resolve));
             rl.close();
-
             if (answer && answer.trim()) {
                 const parsed = parseInt(answer.trim());
-                if (!isNaN(parsed)) {
-                    port = parsed;
-                }
+                if (!isNaN(parsed)) port = parsed;
             }
             await ConfigLoader.saveSettings({ port });
             console.log(`Port ${port} saved to settings.json.`);
         } else {
-
             await ConfigLoader.saveSettings({ port });
         }
-
     } else {
-        port = settings.port;
+        port = settingsCfg.port;
         console.log(`Using configured port: ${port}`);
     }
 
@@ -86,16 +67,10 @@ const start = async () => {
     const socketServer = new SocketServer(server.httpServer);
 
     setViewerBasePort(port);
-
     botManager.loadSavedBots();
     server.start();
 
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: 'ImperialsBot > '
-    });
-
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'ImperialsBot > ' });
     console.log('\x1b[36mImperialsBot CLI Ready. Type "help" for commands.\x1b[0m');
     rl.prompt();
 
@@ -103,33 +78,14 @@ const start = async () => {
 
     rl.on('line', async (line) => {
         const trimmed = line.trim();
-        if (!trimmed) {
-            rl.prompt();
-            return;
-        }
-
+        if (!trimmed) { rl.prompt(); return; }
         AuditLogger.log('CLI', 'admin', `Command executed: ${trimmed}`);
-
         const parts = trimmed.split(/\s+/);
         const cmd = parts[0]?.toLowerCase();
         const args = parts.slice(1);
 
         if (cmd === 'help') {
-            console.log('\nAvailable Commands:');
-            console.log('  status             - Show status of all bots');
-            console.log('  list               - Detailed bot list');
-            console.log('  chat <bot> <msg>   - Send message from bot');
-            console.log('  chatall <msg>      - Send message from all bots');
-            console.log('  stop <bot>         - Disconnect a bot');
-            console.log('  start <bot>        - Start a disconnected bot');
-            console.log('  reconnect <bot>    - Reconnect a bot');
-            console.log('  spammer <bot>      - Toggle spammer for bot');
-            console.log('  autoauth <bot>     - Toggle auto-auth for bot');
-            console.log('  antiafk <bot>      - Toggle antiafk for bot');
-            console.log('  headless           - Enable Global Headless');
-            console.log('  gui                - Disable Global Headless');
-            console.log('  clear              - Clear terminal');
-            console.log('  exit               - Shutdown and exit\n');
+            console.log('\nAvailable Commands:\n  status             - Show status of all bots\n  list               - Detailed bot list\n  chat <bot> <msg>   - Send message from bot\n  chatall <msg>      - Send message from all bots\n  stop <bot>         - Disconnect a bot\n  start <bot>        - Start a disconnected bot\n  reconnect <bot>    - Reconnect a bot\n  spammer <bot>        - Toggle spammer for bot\n  autoauth <bot>     - Toggle auto-auth for bot\n  antiafk <bot>      - Toggle antiafk for bot\n  headless           - Enable Global Headless\n  gui                - Disable Global Headless\n  clear              - Clear terminal\n  exit               - Shutdown and exit\n');
         } else if (cmd === 'status') {
             const bots = botManager.getAllBots();
             console.log(`\nBots Status (${bots.length}):`);
@@ -158,9 +114,7 @@ const start = async () => {
         } else if (cmd === 'chatall' && args.length >= 1) {
             const msg = args.join(' ');
             const bots = Array.from(botManager.bots.values());
-            bots.forEach(b => {
-                if (b.bot) b.bot.chat(msg);
-            });
+            bots.forEach(b => { if (b.bot) b.bot.chat(msg); });
             console.log(`Sent to ${bots.length} bots: ${msg}`);
         } else if (cmd === 'stop' && args[0]) {
             botManager.stopBot(args[0]);
@@ -200,6 +154,8 @@ const start = async () => {
                     bot.savePluginStates();
                     console.log(`AutoAuth for ${args[0]} is now ${auth.enabled ? 'ENABLED' : 'DISABLED'}`);
                 }
+            } else {
+                console.log(`Bot "${args[0]}" not found.`);
             }
         } else if (cmd === 'antiafk' && args[0]) {
             const bot = botManager.getBot(args[0]);
@@ -208,8 +164,11 @@ const start = async () => {
                 if (afk) {
                     afk.enabled = !afk.enabled;
                     bot.savePluginStates();
+                    bot.savePluginStates();
                     console.log(`AntiAFK for ${args[0]} is now ${afk.enabled ? 'ENABLED' : 'DISABLED'}`);
                 }
+            } else {
+                console.log(`Bot "${args[0]}" not found.`);
             }
         } else if (cmd === 'headless') {
             botManager.setGlobalHeadless(true);
@@ -225,13 +184,13 @@ const start = async () => {
         rl.prompt();
     });
 
-    const handleExit = () => {
+    const handleExit = async () => {
         console.log('\nShutting down gracefully...');
+        await closeDatabase();
         botManager.shutdown();
         setTimeout(() => process.exit(0), 1000);
     };
 
-    // Cloud Graceful Shutdown (SIGTERM/SIGINT)
     process.on('SIGTERM', handleExit);
     process.on('SIGINT', handleExit);
 };
