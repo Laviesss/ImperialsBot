@@ -15,8 +15,16 @@ const start = async () => {
 
     // Initialize database if configured
     const settings = await ConfigLoader.loadSettings();
-    if (settings && settings.database) {
-        await initDB(settings.database);
+    const dbEnvType = process.env.IMPERIALS_DB_TYPE;
+    const dbEnvUrl = process.env.IMPERIALS_DB_URL;
+
+    if ((settings && settings.database) || (dbEnvType && dbEnvUrl)) {
+        const dbConfig = {
+            type: dbEnvType || settings?.database?.type,
+            connectionString: dbEnvUrl || settings?.database?.connectionString,
+            ...settings?.database
+        };
+        await initDB(dbConfig);
     } else {
         Logger.log('No database configured for chat logs. Chat history will be volatile.', 'WARNING');
     }
