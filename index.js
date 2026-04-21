@@ -67,8 +67,9 @@ const start = async () => {
             await ConfigLoader.saveSettings({ port });
         }
     } else {
-        port = settingsCfg.port;
-        console.log(`Using configured port: ${port}`);
+        // Use Render's PORT env var if it exists, otherwise use the saved setting
+        port = process.env.PORT ? parseInt(process.env.PORT) : settingsCfg.port;
+        console.log(`Using port: ${port} ${process.env.PORT ? '(from Render ENV)' : '(from settings)'}`);
     }
 
     const server = new ExpressServer(port);
