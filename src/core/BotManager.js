@@ -123,7 +123,8 @@ class BotManager extends EventEmitter {
         const savedBots = await ConfigLoader.loadBots();
         for (const config of savedBots) {
             try {
-                await this.createBot(config, false, false);
+                const autoStart = config.autoStart === true;
+                await this.createBot(config, false, autoStart);
             } catch (err) {
                 console.error(`Failed to load saved bot ${config.username}:`, err);
             }

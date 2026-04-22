@@ -172,6 +172,15 @@ export class BotClient extends EventEmitter {
         }
     }
 
+    async updateAutoStart(value) {
+        this.config.autoStart = value;
+        try {
+            await ConfigLoader.addBotConfig(this.config);
+        } catch (e) {
+            this.log(`Failed to save auto-start state: ${e.message}`, 'error');
+        }
+    }
+
     log(message, type = 'info', emit = true) {
         let msgStr;
         try {
@@ -246,6 +255,7 @@ export class BotClient extends EventEmitter {
 
     async init() {
         this.manuallyStopped = false;
+        await this.updateAutoStart(true);
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
@@ -775,6 +785,7 @@ export class BotClient extends EventEmitter {
 
     stop() {
         this.manuallyStopped = true;
+        this.updateAutoStart(false);
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
