@@ -64,11 +64,16 @@ export class ExpressServer {
         }));
     }
 
-    createProxyHandler(targetPort) {
+    createProxyHandler(targetPort, rewritePath = false) {
         return createProxyMiddleware({
             target: `http://127.0.0.1:${targetPort}`,
             changeOrigin: true,
-            pathRewrite: (path) => path,
+            pathRewrite: (path) => {
+                if (rewritePath) {
+                    return path.replace(/^\/viewer\/\d+/, '');
+                }
+                return path;
+            },
             onProxyReq: (proxyReq, req, res) => {
                 fixRequestBody(proxyReq, req);
             },
@@ -143,13 +148,9 @@ export class ExpressServer {
                 const authorizedPorts = botManager.getAuthorizedPorts();
 
                 if (authorizedPorts.has(targetPort)) {
-                    const proxy = this.createProxyHandler(targetPort);
+                    const proxy = this.createProxyHandler(targetPort, true);
                     proxy(req, res, next);
                 } else {
-                    res.status(403).json({ error: 'Access Denied: Port not authorized' });
-                }
-            });
-        }
     }
 
     start() {
