@@ -28,8 +28,8 @@ export class ExpressServer {
         this.app.use(compression());
         this.app.use(express.json());
 
-        // Asset Proxy for Prismarine Viewer (Fixes Render Black Screen)
-        this.app.use(['/socket.io', '/assets'], (req, res, next) => {
+        // Comprehensive Viewer Asset Proxy (Fixes Render Black Screen)
+        this.app.use((req, res, next) => {
             const referer = req.headers.referer;
             if (!referer) return next();
 
@@ -37,8 +37,15 @@ export class ExpressServer {
             if (match) {
                 const targetPort = parseInt(match[1]);
                 const { botManager } = require('../core/BotManager.js');
+                
                 if (botManager.getAuthorizedPorts().has(targetPort)) {
-                    return this.createProxyHandler(targetPort)(req, res, next);
+                    // Proxy any request that looks like a viewer asset or socket
+                    if (req.url.startsWith('/socket.io') || 
+                        req.url.includes('.js') || 
+                        req.url.includes('.css') || 
+                        req.url.startsWith('/assets')) {
+                        return this.createProxyHandler(targetPort)(req, res, next);
+                    }
                 }
             }
             next();
