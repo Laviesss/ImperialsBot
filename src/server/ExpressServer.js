@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { createRequire } from 'module';
 import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
+import httpProxy from 'http-proxy';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -145,6 +146,25 @@ export class ExpressServer {
     }
 
     start() {
+        // WebSocket Upgrade Proxy (Critical for Prismarine Viewer on Render)
+        this.httpServer.on('upgrade', (req, socket, head) => {
+            if (req.url.startsWith('/socket.io')) {
+                const referer = req.headers.referer;
+                if (referer) {
+                    const match = referer.match(/\/viewer\/(\d+)/);
+                    if (match) {
+                        const targetPort = parseInt(match[1]);
+                        const { botManager } = require('../core/BotManager.js');
+                        if (botManager.getAuthorizedPorts().has(targetPort)) {
+                            const proxy = httpProxy.createProxyServer({ ws: true });
+                            proxy.ws(req, socket, head, { target: `http://127.0.0.1:${targetPort}` });
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
         this.httpServer.listen(this.port, () => {
             console.log(`Server running on http://localhost:${this.port}`);
         });
