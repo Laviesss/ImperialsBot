@@ -151,6 +151,10 @@ export class ExpressServer {
                     const proxy = this.createProxyHandler(targetPort, true);
                     proxy(req, res, next);
                 } else {
+                    res.status(403).json({ error: 'Access Denied: Port not authorized' });
+                }
+            });
+        }
     }
 
     start() {
