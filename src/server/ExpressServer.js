@@ -28,8 +28,8 @@ export class ExpressServer {
         this.app.use(compression());
         this.app.use(express.json());
 
-        // Comprehensive Viewer Asset Proxy (Fixes Render Black Screen)
-        this.app.use((req, res, next) => {
+        // Socket.io Asset Proxy (Referer-based for Root-level requests)
+        this.app.use('/socket.io', (req, res, next) => {
             const referer = req.headers.referer;
             if (!referer) return next();
 
@@ -37,15 +37,8 @@ export class ExpressServer {
             if (match) {
                 const targetPort = parseInt(match[1]);
                 const { botManager } = require('../core/BotManager.js');
-                
                 if (botManager.getAuthorizedPorts().has(targetPort)) {
-                    // Proxy any request that looks like a viewer asset or socket
-                    if (req.url.startsWith('/socket.io') || 
-                        req.url.includes('.js') || 
-                        req.url.includes('.css') || 
-                        req.url.startsWith('/assets')) {
-                        return this.createProxyHandler(targetPort)(req, res, next);
-                    }
+                    return this.createProxyHandler(targetPort)(req, res, next);
                 }
             }
             next();
@@ -132,7 +125,7 @@ export class ExpressServer {
                 const authorizedPorts = botManager.getAuthorizedPorts();
                 
                 if (authorizedPorts.has(targetPort)) {
-                    const proxy = this.createProxyHandler(targetPort);
+                    const proxy = this.createProxyHandler(targetPort, true);
                     proxy(req, res, next);
                 } else {
                     res.status(403).json({ error: 'Access Denied: Port not authorized' });
