@@ -42,6 +42,8 @@ export class Viewer extends BaseFeature {
                 port: port,
                 host: '127.0.0.1',
                 firstPerson: !!this.botClient.config.firstPerson,
+                // Use prefix to align internal server paths with proxy routes
+                prefix: `/viewer/${port}`,
                 // Memory Optimizations for Render Free Plan
                 distance: 5,
                 chunkSize: 8

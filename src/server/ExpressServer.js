@@ -28,18 +28,18 @@ export class ExpressServer {
         this.app.use(compression());
         this.app.use(express.json());
 
-        // Socket.io Asset Proxy (Referer-based for Root-level requests)
-        this.app.use('/socket.io', (req, res, next) => {
-            const referer = req.headers.referer;
-            if (!referer) return next();
+        // Security Headers
+        this.app.use((req, res, next) => {
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+            res.setHeader('X-XSS-Protection', '1; mode=block');
+            next();
+        });
 
-            const match = referer.match(/\/viewer\/(\d+)/);
-            if (match) {
-                const targetPort = parseInt(match[1]);
-                const { botManager } = require('../core/BotManager.js');
-                if (botManager.getAuthorizedPorts().has(targetPort)) {
-                    return this.createProxyHandler(targetPort)(req, res, next);
-                }
+        this.app.use(express.static(path.join(__dirname, '../../public'), {
+            maxAge: '1d'
+        }));
+    }
             }
             next();
         });
@@ -57,16 +57,11 @@ export class ExpressServer {
         }));
     }
 
-    createProxyHandler(targetPort, rewritePath = false) {
+    createProxyHandler(targetPort) {
         return createProxyMiddleware({
             target: `http://127.0.0.1:${targetPort}`,
             changeOrigin: true,
-            pathRewrite: (path) => {
-                if (rewritePath) {
-                    return path.replace(/^\/viewer\/\d+/, '');
-                }
-                return path;
-            },
+            pathRewrite: (path) => path,
             onProxyReq: (proxyReq, req, res) => {
                 fixRequestBody(proxyReq, req);
             },
@@ -141,30 +136,27 @@ export class ExpressServer {
                 const authorizedPorts = botManager.getAuthorizedPorts();
 
                 if (authorizedPorts.has(targetPort)) {
-                    const proxy = this.createProxyHandler(targetPort, true);
+                    const proxy = this.createProxyHandler(targetPort);
                     proxy(req, res, next);
                 } else {
                     res.status(403).json({ error: 'Access Denied: Port not authorized' });
                 }
             });
-        }
+}
     }
 
     start() {
         // WebSocket Upgrade Proxy (Critical for Prismarine Viewer on Render)
         this.httpServer.on('upgrade', (req, socket, head) => {
             if (req.url.startsWith('/socket.io')) {
-                const referer = req.headers.referer;
-                if (referer) {
-                    const match = referer.match(/\/viewer\/(\d+)/);
-                    if (match) {
-                        const targetPort = parseInt(match[1]);
-                        const { botManager } = require('../core/BotManager.js');
-                        if (botManager.getAuthorizedPorts().has(targetPort)) {
-                            const proxy = httpProxy.createProxyServer({ ws: true });
-                            proxy.ws(req, socket, head, { target: `http://127.0.0.1:${targetPort}` });
-                            return;
-                        }
+                const match = req.url.match(/\/viewer\/(\d+)\/socket.io/);
+                if (match) {
+                    const targetPort = parseInt(match[1]);
+                    const { botManager } = require('../core/BotManager.js');
+                    if (botManager.getAuthorizedPorts().has(targetPort)) {
+                        const proxy = httpProxy.createProxyServer({ ws: true });
+                        proxy.ws(req, socket, head, { target: `http://127.0.0.1:${targetPort}` });
+                        return;
                     }
                 }
             }
