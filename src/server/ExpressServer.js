@@ -40,22 +40,6 @@ export class ExpressServer {
             maxAge: '1d'
         }));
     }
-            }
-            next();
-        });
-
-        // Security Headers
-        this.app.use((req, res, next) => {
-            res.setHeader('X-Content-Type-Options', 'nosniff');
-            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-            res.setHeader('X-XSS-Protection', '1; mode=block');
-            next();
-        });
-
-        this.app.use(express.static(path.join(__dirname, '../../public'), {
-            maxAge: '1d'
-        }));
-    }
 
     createProxyHandler(targetPort) {
         return createProxyMiddleware({
@@ -142,7 +126,6 @@ export class ExpressServer {
                     res.status(403).json({ error: 'Access Denied: Port not authorized' });
                 }
             });
-}
     }
 
     start() {
